@@ -1,7 +1,7 @@
 ! Compile with Intel Fortran:
-! ifort -O3 nlm_der.f90 -I/usr/local/src/Healpix_3.80/includeifort -cm -w -sox -qopt-report=0 -qopenmp -fPIC -o nlm_der -L/usr/local/src/Healpix_3.80/libifort -L/usr/lib -L/usr/local/src/Healpix_3.80/lib -lhealpix -lhpxgif -lsharp -lcfitsio -Wl,-R/usr/lib -Wl,-R/usr/local/src/Healpix_3.80/lib -Wl,-R/usr/local/src/Healpix_3.80/libifort -lcurl
+! ifort -O3 nlm_der1.f90 -I/usr/local/src/Healpix_3.80/includeifort -cm -w -sox -qopt-report=0 -qopenmp -fPIC -o nlm_der1 -L/usr/local/src/Healpix_3.80/libifort -L/usr/lib -L/usr/local/src/Healpix_3.80/lib -lhealpix -lhpxgif -lsharp -lcfitsio -Wl,-R/usr/lib -Wl,-R/usr/local/src/Healpix_3.80/lib -Wl,-R/usr/local/src/Healpix_3.80/libifort -lcurl
 
-program nlm_der
+program nlm_der1
 
 use healpix_modules
 
