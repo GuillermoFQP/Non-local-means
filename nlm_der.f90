@@ -1,3 +1,5 @@
+! Non-local means denoising for HEALPIx maps with Gaussian weighting function that includes invariants constructed from 1st and 2nd derivatives
+!
 ! Compile with Intel Fortran:
 ! ifort -O3 nlm_der2.f90 -I/usr/local/src/Healpix_3.80/includeifort -cm -w -sox -qopt-report=0 -qopenmp -fPIC -o nlm_der2 -L/usr/local/src/Healpix_3.80/libifort -L/usr/lib -L/usr/local/src/Healpix_3.80/lib -lhealpix -lhpxgif -lsharp -lcfitsio -Wl,-R/usr/lib -Wl,-R/usr/local/src/Healpix_3.80/lib -Wl,-R/usr/local/src/Healpix_3.80/libifort -lcurl
 
