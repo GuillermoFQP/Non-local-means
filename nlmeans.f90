@@ -27,7 +27,7 @@ if (nArguments() /= 4) then
 end if
 
 call getArgument(1, fin); call getArgument(2, fout)        ! Input and output file names
-call getArgument(3, amount_arg); read(amount_arg,*) amount ! Sigma parameter
+call getArgument(3, amount_arg); read(amount_arg,*) amount ! Sigma parameter scaling
 call getArgument(4, fwhm_arg); read(fwhm_arg,*) fwhm       ! FWHM size of the gaussian beam in arcminutes
 
 npix = getsize_fits(fin, nmaps=nmaps, nside=nside, ordering=ord)
