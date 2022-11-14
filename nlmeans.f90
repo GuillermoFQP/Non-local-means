@@ -1,4 +1,4 @@
-! Non local means denoising for HEALPix maps
+! Non-local means denoising method for HEALPix maps 
 
 program nlmeans
 
@@ -8,29 +8,28 @@ implicit none
 
 !===============================================================
 real(DP), allocatable :: map_in(:,:), map_out(:,:), F(:,:)
-integer               :: nside, npix, nmaps, ord, lmax, bmax, n, i
-real(DP)              :: FP, FWHM, FWHM_rad, w(3), radius
-character(len=80)     :: fin, fout, fres, FP_arg, FWHM_arg, header(43)
+integer               :: nside, npix, nmaps, ord, lmax, n, i
+real(DP)              :: alpha, FWHM, w(3), radius
+real(DP), parameter   :: arcmin2rad = pi/(180*60)
+character(len=80)     :: fin, fout, fres, arg, header(43)
 !===============================================================
 
 ! Input parameters
 if (nArguments() /= 4 .and. nArguments() /= 5) then
-	write (*,*) "Usage: nlmeans input_file output_file FWHM filtering_parameter [residual_file]"
+	write (*,'(/,X,A)') "Usage: nlmeans input_file output_file FWHM filtering_parameter [residual_file]"
 	call fatal_error('Not enough arguments')
 end if
 
-call getArgument(1, fin); call getArgument(2, fout)        ! Input and output file names
-call getArgument(3, FWHM_arg); read(FWHM_arg,*) FWHM       ! FWHM size of the gaussian beam in arcminutes
-call getArgument(4, FP_arg); read(FP_arg,*) FP             ! Filtering parameter
-if (nArguments() == 5) call getArgument(5, fres)
+call getArgument(1, fin); call getArgument(2, fout) ! Input and output file names
+call getArgument(3, arg); read(arg,*) FWHM          ! FWHM size of the gaussian beam in arcminutes
+call getArgument(4, arg); read(arg,*) alpha         ! Filtering parameter
+if (nArguments() == 5) call getArgument(5, fres)    ! Residual file name
 
-FWHM_rad = (FWHM/60)*(pi/180)
+! Map parameters
+npix = getsize_fits(fin, nmaps=nmaps, nside=nside, ordering=ord); n = nside2npix(nside) - 1
 
-npix   = getsize_fits(fin, nmaps=nmaps, nside=nside, ordering=ord)
-n      = nside2npix(nside) - 1
-bmax   = int(4*sqrt(-log(2.0)*log(1.0d-7))/FWHM_rad + 0.5)
-lmax   = min(3*nside-1, bmax, 1000)
-radius = min(max(64.0/nside, FWHM_rad), 0.5)
+! Parameters for Gaussian-smoothing and radius for filtering
+lmax = 3*nside - 1; radius = min(max(64.0/nside, FWHM*arcmin2rad), 0.5)
 
 ! Allocating arrays
 allocate(map_in(0:n,nmaps), map_out(0:n,nmaps), F(0:n,3), source=0.0)
@@ -38,21 +37,24 @@ allocate(map_in(0:n,nmaps), map_out(0:n,nmaps), F(0:n,3), source=0.0)
 ! Reading input map
 call input_map(fin, map_in, npix, nmaps)
 
-write (*,*) "Map read successfully."
+write (*,'(/,X,A,/,X,A)') "Map read successfully.", "Computing Minkowski functionals."
 
 ! Computing Minkowski functionals
 call invariant_features(map_in(:,1), nside, ord, lmax, FWHM, F, w)
 
-write (*,*) "Minkowski functionals generated successfully."
+! All the following subroutines are designed for maps in NESTED ordering
+if (ord == 1) call convert_ring2nest(nside, map_in)
 
-! Non-local means denoising procedure
-call nlmeans_denoising(map_in, nside, nmaps, ord, radius, F, FP*w, map_out)
+write (*,*) "Map denoising in progress."
 
-write (*,*) "Non-local means procedure applied successfully."
+! Non-local means denoising subroutine
+call non_local_means(map_in(:,1), nside, radius, F, w/(alpha**2), map_out(:,1))
+
+! Go back to RING ordering if necessary
+if (ord == 1) then; call convert_nest2ring(nside, map_in); call convert_nest2ring(nside, map_out); end if
 
 ! Generating output file
-call write_minimal_header(header, 'map', nside=nside, order=ord)
-call output_map(map_out, header, fout)
+call write_minimal_header(header, 'map', nside=nside, order=ord); call output_map(map_out, header, fout)
 write (*,*) "Output file generated successfully."
 
 ! Generating residual map file
@@ -67,109 +69,85 @@ contains
 
 subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
 	integer, intent(in)       :: nside, ord, lmax
-	real(DP), intent(in)      :: map_in(0:12*nside**2-1), FWHM
+	real(DP), intent(inout)   :: map_in(0:12*nside**2-1)
+    real(DP), intent(in)      :: FWHM
 	real(DP), intent(out)     :: F(0:12*nside**2-1,3), w(3)
 	real(DP), allocatable     :: I(:), D1(:,:), D2(:,:), cot(:), CG2(:)
-	complex(DPC), allocatable :: alm(:,:,:), rho_array(:)
+	complex(DPC), allocatable :: alm(:,:,:), rho_map(:)
 	real(DP)                  :: theta, phi, delta, rho, sigma
-	integer                   :: n, p
+	integer                   :: j, p
 	
 	n = nside2npix(nside) - 1
 	
-	allocate(I(0:n), alm(1,0:lmax,0:lmax), D1(0:n,2), D2(0:n,3), cot(0:n), CG2(0:n), rho_array(0:n))
+	allocate(I(0:n), alm(1,0:lmax,0:lmax), D1(0:n,2), D2(0:n,3), cot(0:n), CG2(0:n), rho_map(0:n))
 	
-	do p = 0, n
-		if (ord==1) call pix2ang_ring(nside, p, theta, phi)
-		if (ord==2) call pix2ang_nest(nside, p, theta, phi)
-		cot(p) = cotan(theta)
-	end do
+    ! The subroutines used here are designed for maps in RING ordering
+    if (ord == 2) call convert_nest2ring(nside, map_in)
+
+    ! Cotangents of the polar angles
+    do p = 0, n; call pix2ang_ring(nside, p, theta, phi); cot(p) = cotan(theta); end do
 	
-	call map2alm(nside, lmax, lmax, map_in, alm)
-	call alter_alm(nside, lmax, lmax, FWHM, alm)
-	call alm2map_der(nside, lmax, lmax, alm, I, D1, D2)
+    ! Computing Gaussian-smoothed map and derivatives
+	call map2alm(nside, lmax, lmax, map_in, alm); call alter_alm(nside, lmax, lmax, FWHM, alm); call alm2map_der(nside, lmax, lmax, alm, I, D1, D2)
 	
-	! Covariant gradiend squared
-	CG2 = D1(:,1)**2 + D1(:,2)**2
+	! Covariant gradiend squared and second covariant derivatives
+	CG2 = D1(:,1)**2 + D1(:,2)**2; D2(:,2) = D2(:,2) - cot * D1(:,2); D2(:,3) = D2(:,3) + cot * D1(:,1)
 	
-	! Second covariant derivatives
-	! D2(:,1) does not need any change
-	D2(:,2) = D2(:,2) - cot * D1(:,2)
-	D2(:,3) = D2(:,3) + cot * D1(:,1)	
+	! Feature space (Gaussian-smoothed map, 1st Minkowski functional and Skeleton maps)
+	F(:,1) = I; F(:,2) = sqrt(CG2); F(:,3) = (D1(:,1)*D1(:,2)*(D2(:,3) - D2(:,1)) + D2(:,2)*(D1(:,1)**2 - D1(:,2)**2)) / CG2
 	
-	! First minkowski functional
-	F(:,1) = I
-	
-	! Second Minkowski functional
-	F(:,2) = sqrt(CG2)
-	
-	! Skeleton invariant
-	F(:,3) = (D1(:,1)*D1(:,2)*(D2(:,3) - D2(:,1)) + D2(:,2)*(D1(:,1)**2 - D1(:,2)**2)) / CG2
-	
-	! Quantities related to the eatures metric (for 1st Mink functional + 2nd Mink functional + skeleton invariant)
-	delta     = ((FWHM / 60) * (pi / 180)) / sqrt(8.0 * log(2.0))
-	rho_array = ((D2(:,1) - D2(:,3))*(D1(:,1)**2 - D1(:,2)**2) + 4.0*D2(:,2)*D1(:,1)*D2(:,2))**2 / CG2**3
-	rho       = sum(rho_array) / (n+1)
+	! Noise variance parameters
+    sigma   = norm2(map_in-F(:,1)) / (n+1)
+	delta   = ((FWHM/60)*(pi/180)) / sqrt(8.0*log(2.0))
+	rho_map = ((D2(:,1)-D2(:,3))*(D1(:,1)**2-D1(:,2)**2)+4.0*D2(:,2)*D1(:,1)*D2(:,2))**2 / CG2**3
+	rho     = sum(rho_map) / (n+1)
 	
 	! Features metric
-	sigma = norm2(map_in - F(:,1)) / (n + 1)
-	w = [1.0, 2.0 * delta**2, 12.0 * delta**4 / (3.0 + (6.0 * rho - 1.0) * delta**2)] / sigma**2
+	w = [1.0, 2.0 * delta**2, 12.0*delta**4 / (3.0+(6.0*rho-1.0)*delta**2)] / sigma**2
+    
+    ! Go back to NESTED ordering if necessary
+    if (ord == 2) then; call convert_ring2nest(nside, map_in); do j = 1, 3; call convert_ring2nest(nside, F(:,j)); end do; end if
 	
-	deallocate(I, alm, D1, D2, cot, CG2, rho_array)
-end subroutine
+	deallocate(I, alm, D1, D2, cot, CG2, rho_map)
+end subroutine invariant_features
 
-subroutine nlmeans_denoising(map_in, nside, nmaps, ord, radius, F, w, map_out)
-	integer, intent(in)   :: nside, nmaps, ord
-	real(DP), intent(in)  :: map_in(0:12*nside**2-1,nmaps), F(0:12*nside**2-1,3), w(3), radius
-	real(DP), intent(out) :: map_out(0:12*nside**2-1,nmaps)
-	integer               :: p, n
+! Non-local means denoising subroutine for an input map in NESTED ordering
+subroutine non_local_means(map_in, nside, radius, F, w, map_out)
+	integer, intent(in)   :: nside
+	real(DP), intent(in)  :: map_in(0:12*nside**2-1), F(0:12*nside**2-1,3), w(3), radius
+	real(DP), intent(out) :: map_out(0:12*nside**2-1)
+    real(DP)              :: vj(3), WS(0:1)
+    integer, allocatable  :: list(:)
+	integer               :: i, j, n, l, nlist
 	
-	n     = nside2npix(nside) - 1
+	n = nside2npix(nside) - 1; l = nside2npix(nside) * sin(radius/2.0)**2
+    
+    allocate(list(0:3*l/2))
 	
-	!$OMP PARALLEL DO
-	do p = 0, n; map_out(p,:) = nlmean(p, nside, nmaps, ord, radius, w, map_in, F(p,:), F); end do
+	!$OMP PARALLEL DO PRIVATE(vj, WS, list, nlist)
+	do i = 0, n
+        ! Disc around pixel "i"
+        call pix2vec_nest(nside, i, vj); call query_disc(nside, vj, radius, list, nlist, nest=1)
+
+        ! Weighted sum WS(1) and normalization constant WS(0)
+        WS = 0.0; do j = 0, nlist-1; WS = WS + weight(w, F(i,:)-F(list(j),:)) * [1.0, map_in(list(j))]; end do
+
+        ! Filtered value
+        map_out(i) = WS(1) / WS(0)
+    end do
 	!$OMP END PARALLEL DO
-end subroutine
+    
+    deallocate(list)
+    
+end subroutine non_local_means
 
-! Non-local mean at a given pixel
-function nlmean(pixel, nside, nmaps, ord, radius, w, map_in, V, F)
-	integer, intent(in)  :: nside, nmaps, ord, pixel
-	real(DP), intent(in) :: map_in(0:12*nside**2-1,nmaps), V(3), F(0:12*nside**2-1,3), w(3), radius
-	real(DP)             :: nlmean(nmaps), WS(0:nmaps), vec(3)
-	integer, allocatable :: list(:)
-	integer              :: p, n, nlist, l
-	
-	n = nside2npix(nside) - 1
-	l = nside2npix(nside) * sin(radius/2.0)**2
-	
-	allocate(list(0:3*l/2), source=0)
-	
-	if (ord == 1) then
-		call pix2vec_ring(nside, pixel, vec)
-		call query_disc(nside, vec, radius, list, nlist)
-	end if
-	
-	if (ord == 2) then
-		call pix2vec_nest(nside, pixel, vec)
-		call query_disc(nside, vec, radius, list, nlist, nest=1)
-	end if
-	
-	WS = 0.0
-	
-	do p = 0, nlist-1
-		WS = WS + weight(w, V-F(list(p),:)) * [1.0, map_in(list(p),:)]
-	end do
-	
-	nlmean = WS(1:nmaps) / WS(0)
-	
-	deallocate(list)
-end function	
-
-! Weighting function
-function weight(w, x)
+! Weight function
+pure function weight(w, x)
 	real(DP), intent(in) :: w(3), x(3)
-	real(DP)             :: weight
+    real(DP)             :: weight
 	
 	weight = exp(-sum(w*x*x)/2.0)
-end function
+    
+end function weight
 
 end program
