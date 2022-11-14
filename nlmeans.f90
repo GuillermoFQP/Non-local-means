@@ -70,7 +70,7 @@ contains
 subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
 	integer, intent(in)       :: nside, ord, lmax
 	real(DP), intent(inout)   :: map_in(0:12*nside**2-1)
-    real(DP), intent(in)      :: FWHM
+	real(DP), intent(in)      :: FWHM
 	real(DP), intent(out)     :: F(0:12*nside**2-1,3), w(3)
 	real(DP), allocatable     :: I(:), D1(:,:), D2(:,:), cot(:), CG2(:)
 	complex(DPC), allocatable :: alm(:,:,:), rho_map(:)
@@ -81,13 +81,13 @@ subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
 	
 	allocate(I(0:n), alm(1,0:lmax,0:lmax), D1(0:n,2), D2(0:n,3), cot(0:n), CG2(0:n), rho_map(0:n))
 	
-    ! The subroutines used here are designed for maps in RING ordering
-    if (ord == 2) call convert_nest2ring(nside, map_in)
+	! The subroutines used here are designed for maps in RING ordering
+	if (ord == 2) call convert_nest2ring(nside, map_in)
 
-    ! Cotangents of the polar angles
-    do p = 0, n; call pix2ang_ring(nside, p, theta, phi); cot(p) = cotan(theta); end do
+    	! Cotangents of the polar angles
+    	do p = 0, n; call pix2ang_ring(nside, p, theta, phi); cot(p) = cotan(theta); end do
 	
-    ! Computing Gaussian-smoothed map and derivatives
+	! Computing Gaussian-smoothed map and derivatives
 	call map2alm(nside, lmax, lmax, map_in, alm); call alter_alm(nside, lmax, lmax, FWHM, alm); call alm2map_der(nside, lmax, lmax, alm, I, D1, D2)
 	
 	! Covariant gradiend squared and second covariant derivatives
@@ -97,7 +97,7 @@ subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
 	F(:,1) = I; F(:,2) = sqrt(CG2); F(:,3) = (D1(:,1)*D1(:,2)*(D2(:,3) - D2(:,1)) + D2(:,2)*(D1(:,1)**2 - D1(:,2)**2)) / CG2
 	
 	! Noise variance parameters
-    sigma   = norm2(map_in-F(:,1)) / (n+1)
+	sigma   = norm2(map_in-F(:,1)) / (n+1)
 	delta   = ((FWHM/60)*(pi/180)) / sqrt(8.0*log(2.0))
 	rho_map = ((D2(:,1)-D2(:,3))*(D1(:,1)**2-D1(:,2)**2)+4.0*D2(:,2)*D1(:,1)*D2(:,2))**2 / CG2**3
 	rho     = sum(rho_map) / (n+1)
@@ -116,13 +116,13 @@ subroutine non_local_means(map_in, nside, radius, F, w, map_out)
 	integer, intent(in)   :: nside
 	real(DP), intent(in)  :: map_in(0:12*nside**2-1), F(0:12*nside**2-1,3), w(3), radius
 	real(DP), intent(out) :: map_out(0:12*nside**2-1)
-    real(DP)              :: vj(3), WS(0:1)
-    integer, allocatable  :: list(:)
+	real(DP)              :: vj(3), WS(0:1)
+	integer, allocatable  :: list(:)
 	integer               :: i, j, n, l, nlist
 	
 	n = nside2npix(nside) - 1; l = nside2npix(nside) * sin(radius/2.0)**2
-    
-    allocate(list(0:3*l/2))
+	
+	allocate(list(0:3*l/2))
 	
 	!$OMP PARALLEL DO PRIVATE(vj, WS, list, nlist)
 	do i = 0, n
@@ -135,7 +135,7 @@ subroutine non_local_means(map_in, nside, radius, F, w, map_out)
         ! Filtered value
         map_out(i) = WS(1) / WS(0)
     end do
-	!$OMP END PARALLEL DO
+    !$OMP END PARALLEL DO
     
     deallocate(list)
     
@@ -144,7 +144,7 @@ end subroutine non_local_means
 ! Weight function
 pure function weight(w, x)
 	real(DP), intent(in) :: w(3), x(3)
-    real(DP)             :: weight
+	real(DP)             :: weight
 	
 	weight = exp(-sum(w*x*x)/2.0)
     
