@@ -105,8 +105,8 @@ subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
 	! Features metric
 	w = [1.0, 2.0 * delta**2, 12.0*delta**4 / (3.0+(6.0*rho-1.0)*delta**2)] / sigma**2
     
-    ! Go back to NESTED ordering if necessary
-    if (ord == 2) then; call convert_ring2nest(nside, map_in); do j = 1, 3; call convert_ring2nest(nside, F(:,j)); end do; end if
+	! Go back to NESTED ordering if necessary
+	if (ord == 2) then; call convert_ring2nest(nside, map_in); do j = 1, 3; call convert_ring2nest(nside, F(:,j)); end do; end if
 	
 	deallocate(I, alm, D1, D2, cot, CG2, rho_map)
 end subroutine invariant_features
@@ -126,19 +126,19 @@ subroutine non_local_means(map_in, nside, radius, F, w, map_out)
 	
 	!$OMP PARALLEL DO PRIVATE(vj, WS, list, nlist)
 	do i = 0, n
-        ! Disc around pixel "i"
-        call pix2vec_nest(nside, i, vj); call query_disc(nside, vj, radius, list, nlist, nest=1)
-
-        ! Weighted sum WS(1) and normalization constant WS(0)
-        WS = 0.0; do j = 0, nlist-1; WS = WS + weight(w, F(i,:)-F(list(j),:)) * [1.0, map_in(list(j))]; end do
-
-        ! Filtered value
-        map_out(i) = WS(1) / WS(0)
-    end do
-    !$OMP END PARALLEL DO
-    
-    deallocate(list)
-    
+        	! Disc around pixel "i"
+        	call pix2vec_nest(nside, i, vj); call query_disc(nside, vj, radius, list, nlist, nest=1)
+		
+        	! Weighted sum WS(1) and normalization constant WS(0)
+        	WS = 0.0; do j = 0, nlist-1; WS = WS + weight(w, F(i,:)-F(list(j),:)) * [1.0, map_in(list(j))]; end do
+		
+        	! Filtered value
+        	map_out(i) = WS(1) / WS(0)
+	end do
+	!$OMP END PARALLEL DO
+	
+	deallocate(list)
+	
 end subroutine non_local_means
 
 ! Weight function
