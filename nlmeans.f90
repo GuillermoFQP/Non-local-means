@@ -8,9 +8,8 @@ implicit none
 
 !===============================================================
 real(DP), allocatable :: map_in(:,:), map_out(:,:), F(:,:)
-integer               :: nside, npix, nmaps, ord, lmax, n, i
-real(DP)              :: alpha, FWHM, w(3), radius
-real(DP), parameter   :: arcmin2rad = pi/(180*60)
+integer               :: nside, npix, nmaps, ord, n, lcut, lmax, i
+real(DP)              :: alpha, fwhm, w(3), radius, fwhm_rad, bl_min
 character(len=80)     :: fin, fout, fres, arg, header(43)
 !===============================================================
 
@@ -20,16 +19,22 @@ if (nArguments() /= 4 .and. nArguments() /= 5) then
 	call fatal_error('Not enough arguments')
 end if
 
-call getArgument(1, fin); call getArgument(2, fout) ! Input and output file names
-call getArgument(3, arg); read(arg,*) FWHM          ! FWHM size of the gaussian beam in arcminutes
-call getArgument(4, arg); read(arg,*) alpha         ! Filtering parameter
-if (nArguments() == 5) call getArgument(5, fres)    ! Residual file name
+call getArgument(1, fin)                         ! Input file name
+call getArgument(2, fout)                        ! Output file name
+call getArgument(3, arg)
+read(arg,*) fwhm                                 ! FWHM size of the gaussian beam in arcminutes
+call getArgument(4, arg)
+read(arg,*) alpha                                ! Filtering parameter
+if (nArguments() == 5) call getArgument(5, fres) ! Residual file name
 
 ! Map parameters
-npix = getsize_fits(fin, nmaps=nmaps, nside=nside, ordering=ord); n = nside2npix(nside) - 1
-
-! Parameters for Gaussian-smoothing and radius for filtering
-lmax = 3*nside - 1; radius = min(max(64.0/nside, FWHM*arcmin2rad), 0.5)
+npix = getsize_fits(fin, nmaps=nmaps, nside=nside, ordering=ord)
+n = nside2npix(nside) - 1                                            ! Total number of pixels minus one
+fwhm_rad = (fwhm/60.0) * (pi/180.0)                                  ! FWHM parameter in radians
+bl_min = 1.0D-8                                                      ! Cutoff value for Gaussian beam
+lcut = int(sqrt(0.25 - 16.0*log(bl_min)*log(2.0)/fwhm_rad**2) - 0.5) ! Cutoff value for "l" due to Gaussian beam
+lmax = min(3*nside - 1, lcut, 4000)                                  ! Maximum "l" for interpolation
+radius = min(max(64.0/nside, fwhm_rad), pi/6.0)                      ! Radius for filtering
 
 ! Allocating arrays
 allocate(map_in(0:n,nmaps), map_out(0:n,nmaps), F(0:n,3), source=0.0)
@@ -40,7 +45,7 @@ call input_map(fin, map_in, npix, nmaps)
 write (*,'(/,X,A,/,X,A)') "Map read successfully.", "Computing Minkowski functionals."
 
 ! Computing Minkowski functionals
-call invariant_features(map_in(:,1), nside, ord, lmax, FWHM, F, w)
+call invariant_features(map_in(:,1), nside, ord, lmax, fwhm, F, w)
 
 ! All the following subroutines are designed for maps in NESTED ordering
 if (ord == 1) call convert_ring2nest(nside, map_in)
@@ -67,10 +72,10 @@ deallocate(map_in, map_out, F)
 
 contains
 
-subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
+subroutine invariant_features(map_in, nside, ord, lmax, fwhm, F, w)
 	integer, intent(in)       :: nside, ord, lmax
 	real(DP), intent(inout)   :: map_in(0:12*nside**2-1)
-	real(DP), intent(in)      :: FWHM
+	real(DP), intent(in)      :: fwhm
 	real(DP), intent(out)     :: F(0:12*nside**2-1,3), w(3)
 	real(DP), allocatable     :: I(:), D1(:,:), D2(:,:), cot(:), CG2(:)
 	complex(DPC), allocatable :: alm(:,:,:), rho_map(:)
@@ -88,7 +93,7 @@ subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
 	do p = 0, n; call pix2ang_ring(nside, p, theta, phi); cot(p) = cotan(theta); end do
 	
 	! Computing Gaussian-smoothed map and derivatives
-	call map2alm(nside, lmax, lmax, map_in, alm); call alter_alm(nside, lmax, lmax, FWHM, alm); call alm2map_der(nside, lmax, lmax, alm, I, D1, D2)
+	call map2alm(nside, lmax, lmax, map_in, alm); call alter_alm(nside, lmax, lmax, fwhm, alm); call alm2map_der(nside, lmax, lmax, alm, I, D1, D2)
 	
 	! Covariant gradiend squared and second covariant derivatives
 	CG2 = D1(:,1)**2 + D1(:,2)**2; D2(:,2) = D2(:,2) - cot * D1(:,2); D2(:,3) = D2(:,3) + cot * D1(:,1)
@@ -98,7 +103,7 @@ subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
 	
 	! Noise variance parameters
 	sigma   = norm2(map_in-F(:,1)) / (n+1)
-	delta   = ((FWHM/60)*(pi/180)) / sqrt(8.0*log(2.0))
+	delta   = (fwhm/60.0) * (pi/180.0) / sqrt(8.0*log(2.0))
 	rho_map = ((D2(:,1)-D2(:,3))*(D1(:,1)**2-D1(:,2)**2)+4.0*D2(:,2)*D1(:,1)*D2(:,2))**2 / CG2**3
 	rho     = sum(rho_map) / (n+1)
 	
