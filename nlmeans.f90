@@ -83,9 +83,9 @@ subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
 	
 	! The subroutines used here are designed for maps in RING ordering
 	if (ord == 2) call convert_nest2ring(nside, map_in)
-
-    	! Cotangents of the polar angles
-    	do p = 0, n; call pix2ang_ring(nside, p, theta, phi); cot(p) = cotan(theta); end do
+	
+	! Cotangents of the polar angles
+	do p = 0, n; call pix2ang_ring(nside, p, theta, phi); cot(p) = cotan(theta); end do
 	
 	! Computing Gaussian-smoothed map and derivatives
 	call map2alm(nside, lmax, lmax, map_in, alm); call alter_alm(nside, lmax, lmax, FWHM, alm); call alm2map_der(nside, lmax, lmax, alm, I, D1, D2)
@@ -109,6 +109,7 @@ subroutine invariant_features(map_in, nside, ord, lmax, FWHM, F, w)
 	if (ord == 2) then; call convert_ring2nest(nside, map_in); do j = 1, 3; call convert_ring2nest(nside, F(:,j)); end do; end if
 	
 	deallocate(I, alm, D1, D2, cot, CG2, rho_map)
+
 end subroutine invariant_features
 
 ! Non-local means denoising subroutine for an input map in NESTED ordering
@@ -124,21 +125,23 @@ subroutine non_local_means(map_in, nside, radius, F, w, map_out)
 	
 	allocate(list(0:3*l/2))
 	
-	!$OMP PARALLEL DO PRIVATE(vj, WS, list, nlist)
+	!$OMP PARALLEL PRIVATE(i, vj, WS, list, nlist, j) SHARED(n, nside, radius, w, F, map_out)
+	!$OMP DO SCHEDULE(DYNAMIC)
 	do i = 0, n
-        	! Disc around pixel "i"
-        	call pix2vec_nest(nside, i, vj); call query_disc(nside, vj, radius, list, nlist, nest=1)
+		! Disc around pixel "i"
+		call pix2vec_nest(nside, i, vj); call query_disc(nside, vj, radius, list, nlist, nest=1)
 		
-        	! Weighted sum WS(1) and normalization constant WS(0)
-        	WS = 0.0; do j = 0, nlist-1; WS = WS + weight(w, F(i,:)-F(list(j),:)) * [1.0, map_in(list(j))]; end do
+		! Weighted sum WS(1) and normalization constant WS(0)
+		WS = 0.0; do j = 0, nlist-1; WS = WS + weight(w, F(i,:)-F(list(j),:)) * [1.0, map_in(list(j))]; end do
 		
-        	! Filtered value
-        	map_out(i) = WS(1) / WS(0)
+		! Filtered value
+		map_out(i) = WS(1) / WS(0)
 	end do
-	!$OMP END PARALLEL DO
+	!$OMP END DO
+	!$OMP END PARALLEL
 	
 	deallocate(list)
-	
+    
 end subroutine non_local_means
 
 ! Weight function
@@ -147,7 +150,7 @@ pure function weight(w, x)
 	real(DP)             :: weight
 	
 	weight = exp(-sum(w*x*x)/2.0)
-    
+	
 end function weight
 
 end program
